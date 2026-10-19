@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+# real patient data must not go to GitHub; keep only the DUMMY sample raw_data.xlsx here
+als_data_*.xlsx
+als_score_timeline_*.csv
+~$*.xlsx
+# left over if a save was interrupted
+data/tmp*.xlsx
