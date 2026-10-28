@@ -2,7 +2,7 @@ __pycache__/
 *.pyc
 # Real patient data must never go to GitHub: the data file stays on the computer.
 # Git holds only sample_data/ (a blank workbook and DUMMY patients).
-data/
+data/*
 als_data_*.xlsx
 als_score_timeline_*.csv
 ~$*.xlsx
