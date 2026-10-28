@@ -62,6 +62,9 @@ BOX_PROMPT = ("Month the patient first reached this level: MM/YYYY, YYYY if only
               "or ? (reached by the latest month (the patient has reached this level, but we don’t know the month)). Blank = not reached.")
 HEADER_FONT = Font(name="Arial", size=10, bold=True)
 HEADER_FILL = PatternFill("solid", fgColor="FFD9E2F3")
+# Rows and columns kept in view while scrolling (Excel "freeze panes"); set once per sheet, because openpyxl
+# adds a pane selection on every assignment and Excel rejects the extra ones ("We found a problem with some content").
+FREEZE = {TYPES: "A2"}                              # header row only; other sheets also keep column A in view
 WIDTHS = {"patient_id": 12, "form_language": 9, "last_assessed": 12, "notes": 40, "treatment": 20,
           "start": 10, "stop": 10}
 
@@ -130,7 +133,7 @@ def to_workbook_bytes(tables: Tables, results: dict[str, pd.DataFrame] | None = 
     _write_readme(wb.active)
     for name in COLUMNS:
         ws = wb.create_sheet(name)
-        _write_table(ws, normalize(name, tables.get(name)), as_text=True)
+        _write_table(ws, normalize(name, tables.get(name)), as_text=True, freeze=FREEZE.get(name, "B2"))
         _prepare_for_excel(ws, name)
     for name, df in (results or {}).items():
         _write_table(wb.create_sheet(name), df, as_text=False)
@@ -146,7 +149,7 @@ def _write_readme(ws: Worksheet) -> None:
     ws.column_dimensions["A"].width = 120
 
 
-def _write_table(ws: Worksheet, df: pd.DataFrame, as_text: bool) -> None:
+def _write_table(ws: Worksheet, df: pd.DataFrame, as_text: bool, freeze: str = "B2") -> None:
     for j, col in enumerate(df.columns, 1):
         cell = ws.cell(1, j, col)
         cell.font, cell.fill = HEADER_FONT, HEADER_FILL
@@ -161,7 +164,7 @@ def _write_table(ws: Worksheet, df: pd.DataFrame, as_text: bool) -> None:
                 cell.number_format = TEXT
             elif isinstance(value, pd.Timestamp):
                 cell.number_format = "mm/yyyy"
-    ws.freeze_panes = "B2"
+    ws.freeze_panes = freeze
     ws.row_dimensions[1].height = 30
 
 
@@ -186,8 +189,6 @@ def _prepare_for_excel(ws: Worksheet, name: str) -> None:
                   "Not on the treatment_types sheet: add the drug there first")
         _hint(ws, MONTH_PROMPT, cells("start"))
         _hint(ws, MONTH_PROMPT + ". Blank = still on.", cells("stop"))
-    elif name == TYPES:
-        ws.freeze_panes = "A2"                      # one short table: no column to keep in view
 
 
 def _dropdown(ws: Worksheet, source: str, cells: str, error: str) -> None:
