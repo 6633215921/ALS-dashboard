@@ -1,14 +1,13 @@
-"""Changes to the tables. Each function takes the latest tables and returns new ones (or raises EditError).
+"""Changes to the tables. Each function takes the latest tables and returns new ones, or raises EditError.
 
-The pages read the data once (cached) and build an edit from what the user typed; right before saving they reload
-the data and apply the edit with these functions, so changes saved by someone else in the meantime are kept or
-reported instead of being overwritten.
+The app applies an edit to the data as it is on disk right before saving (see views.data), so an edit only
+changes the rows it is about.
 """
 from __future__ import annotations
 
 import pandas as pd
 
-from .model import COLUMNS, FORMS, TREATMENTS, TYPES, Tables, normalize, sorted_courses
+from .model import COLUMNS, FORMS, TREATMENTS, TYPES, Tables, normalize
 
 
 class EditError(ValueError):
@@ -24,7 +23,7 @@ def upsert_patient(tables: Tables, old_id: str | None, form: dict, courses: list
     ids = set(forms["patient_id"])
     new_id = form["patient_id"]
     if old_id is not None and old_id not in ids:
-        raise EditError(f"{old_id} is no longer in the data (deleted by someone else?). Press Reload data.")
+        raise EditError(f"{old_id} is no longer in the data (deleted in Excel or another window?).")
     if new_id != old_id and new_id in ids:
         raise EditError(f"{new_id} already exists. Choose another patient ID.")
     pos = len(forms) if old_id is None else int((forms["patient_id"] == old_id).to_numpy().argmax())
@@ -42,16 +41,13 @@ def delete_patient(tables: Tables, pid: str) -> Tables:
             TREATMENTS: tables[TREATMENTS][tables[TREATMENTS]["patient_id"] != pid].reset_index(drop=True)}
 
 
-def update_types(tables: Tables, shown: pd.DataFrame, edited: pd.DataFrame, renames: dict[str, str]) -> Tables:
-    """Save the treatment-type list. renames = {old name: new name}; renamed types are renamed in every course.
+def update_types(tables: Tables, edited: pd.DataFrame, renames: dict[str, str]) -> Tables:
+    """Save the treatment-type list. renames = {old name: new name}; a renamed type is renamed in every course.
 
-    shown = the list the user started from (to detect a change by someone else). A type still used in a course
-    cannot be removed.
+    A type that is still used in a course cannot be removed.
     """
-    if not _same(TYPES, shown, tables[TYPES]):
-        raise EditError("Someone else changed the treatment types. Press Reload data and redo your change.")
     new_types = normalize(TYPES, edited)
-    removed = set(shown["treatment"]) - set(new_types["treatment"]) - set(renames)
+    removed = set(tables[TYPES]["treatment"]) - set(new_types["treatment"]) - set(renames)
     still_used = removed & set(tables[TREATMENTS]["treatment"])
     if still_used:
         raise EditError(f"Still used in treatment courses: {', '.join(sorted(still_used))}. "
@@ -60,12 +56,6 @@ def update_types(tables: Tables, shown: pd.DataFrame, edited: pd.DataFrame, rena
     return {**tables, TYPES: new_types, TREATMENTS: treatments}
 
 
-def replace_courses(tables: Tables, shown: pd.DataFrame, edited: pd.DataFrame, ids: list[str]) -> Tables:
-    """Save the whole treatment-course table (shown = the rows the user started from)."""
-    if not _same(TREATMENTS, sorted_courses(shown, ids), sorted_courses(tables[TREATMENTS], ids)):
-        raise EditError("Someone else changed the treatment courses. Press Reload data and redo your change.")
+def replace_courses(tables: Tables, edited: pd.DataFrame) -> Tables:
+    """Save the whole treatment-course table."""
     return {**tables, TREATMENTS: normalize(TREATMENTS, edited)}
-
-
-def _same(name: str, a: pd.DataFrame, b: pd.DataFrame) -> bool:
-    return normalize(name, a).equals(normalize(name, b))

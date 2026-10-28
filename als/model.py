@@ -61,6 +61,7 @@ def as_text(value) -> str:
 
 
 def empty_tables() -> Tables:
+    """No patients and no courses; the default treatment types."""
     tables = {name: pd.DataFrame(columns=cols) for name, cols in COLUMNS.items()}
     tables[TYPES] = pd.DataFrame({"treatment": list(DEFAULT_TYPES), "notes": [""] * len(DEFAULT_TYPES)})
     return tables

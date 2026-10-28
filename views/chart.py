@@ -10,7 +10,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from als.model import month_start
-from als.scoring import RAW_ONLY, STEP, Course, Fit
+from als.scoring import RAW_ONLY, STEP, Course, Fit, rounded
 
 # Treatment colours: grey = no drug, a hue per drug state (blue / orange / aqua validated as a colour-blind-safe
 # set). "off treatment" is grey + dotted so it differs from "before" by pattern. Treatment types added later get
@@ -45,6 +45,17 @@ SLOPE_LINES = [
 ]
 
 
+@dataclass(frozen=True, eq=False)
+class PatientChart:
+    """One patient's data as the Dashboard shows it."""
+    pid: str
+    grid: pd.DataFrame                      # monthly timeline (als.scoring.monthly) with a 'date' column
+    courses: list[Course]
+    order: list[str]                        # treatment types in list order: drug colours and 'A + B' labels
+    groups: dict[str, pd.DataFrame]         # months of each slope (als.scoring.slope_groups)
+    fits: dict[str, Fit | None]             # the fit of each group
+
+
 @dataclass
 class ChartOptions:
     method: str                             # als.scoring LINEAR / STEP / RAW_ONLY
@@ -72,9 +83,9 @@ def style(label: str, order: list[str]) -> tuple[str, str]:
     return COMBO_COLOURS[zlib.crc32(label.encode()) % len(COMBO_COLOURS)], "solid"
 
 
-def figure(pid: str, grid: pd.DataFrame, courses: list[Course], order: list[str], opts: ChartOptions,
-           groups: dict[str, pd.DataFrame], fits: dict[str, Fit | None]) -> go.Figure:
-    """grid = monthly timeline with a 'date' column; groups / fits = als.scoring.slope_groups and their fits."""
+def figure(data: PatientChart, opts: ChartOptions) -> go.Figure:
+    """The Dashboard chart of one patient."""
+    grid, order = data.grid, data.order
     fig = go.Figure()
     if "range" in opts.slopes and opts.time_of_interest != opts.full_range:
         start, end = opts.time_of_interest
@@ -87,10 +98,10 @@ def figure(pid: str, grid: pd.DataFrame, courses: list[Course], order: list[str]
     _raw_points(fig, grid[grid["source"] == "raw"], order, in_legend)
     for line in SLOPE_LINES:
         if line.key in opts.slopes:
-            _slope_line(fig, groups[line.key], fits[line.key], line)
+            _slope_line(fig, data.groups[line.key], data.fits[line.key], line)
     if opts.show_drugs:
-        _drug_markers(fig, courses, order)
-    _layout(fig, pid)
+        _drug_markers(fig, data.courses, order)
+    _layout(fig, data.pid)
     _marker_legend(fig, opts)
     return fig
 
@@ -153,7 +164,7 @@ def _raw_points(fig, points, order, in_legend):
 def _slope_line(fig, subset, result, line: SlopeLine):
     if result is None:
         return
-    slope = round(result.slope, 2) + 0.0
+    slope = rounded(result)
     x0, x1 = int(subset["month_no"].min()), int(subset["month_no"].max())
     n_raw = int((subset["source"] == "raw").sum())
     fig.add_trace(go.Scatter(

@@ -22,16 +22,8 @@ from als.model import (
     treatment_names,
 )
 from als.scoring import current_scores
-from views.shared import (
-    NEW_PATIENT,
-    course_columns,
-    editor_version,
-    load_latest,
-    load_tables,
-    pick_patient,
-    save,
-    show_flash,
-)
+from views import data, state
+from views.widgets import NEW_PATIENT, course_columns, pick_patient
 
 COURSE_COLS = ["treatment", "start", "stop", "notes"]
 LEVEL_HELP = "Month the patient first reached this level: MM/YYYY, or YYYY if only the year is known, or ?"
@@ -39,14 +31,14 @@ LEVEL_HELP = "Month the patient first reached this level: MM/YYYY, or YYYY if on
 
 def render() -> None:
     st.title("Patient form")
-    show_flash()
-    tables = load_tables()
+    state.show_flash()
+    tables = data.load_tables()
     choice = pick_patient(patient_ids(tables[FORMS]), key="pick_form", allow_new=True, label="Patient")
     is_new = choice == NEW_PATIENT
     row = _blank_form() if is_new else form_row(tables, choice)
     treatments = tables[TREATMENTS]
     courses = treatments[treatments["patient_id"] == choice][COURSE_COLS].reset_index(drop=True)
-    ver = editor_version()
+    ver = state.editor_version()
 
     with st.form(f"patient_{choice}_{ver}"):
         c1, c2, c3 = st.columns(3)
@@ -57,7 +49,7 @@ def render() -> None:
                              help="Month of the latest assessment. Needed when it is later than the last change.")
         notes = st.text_input("Notes", row["notes"])
         st.markdown("**ALSFRS-R**: month the patient first reached each level. Level 4 (normal) needs no "
-                    "month. `2025` = only the year is known, `?` = reached by the latest month.")
+                    "month. `2025` = only the year is known, `?` = reached by the latest month.(the patient has reached this level, but we don’t know the month)")
         boxes = st.data_editor(_box_grid(row), hide_index=True, disabled=["Item"], height=35 * 13 + 3,
                                column_config=_box_columns(), key=f"grid_{choice}_{ver}")
         st.markdown("**Treatment courses**: one row per course (add rows with +). Blank stop = still on. "
@@ -71,23 +63,28 @@ def render() -> None:
                 "notes": as_text(notes),
                 **{box(item, level): as_text(boxes.at[item, f"L{level}"]) for item in ITEMS for level in LEVELS}}
         course_rows = [{col: as_text(r[col]) for col in COURSE_COLS} for _, r in new_courses.iterrows()]
-        before = load_latest()
-        try:
-            after = edits.upsert_patient(before, None if is_new else choice, form, course_rows)
-        except edits.EditError as err:
-            st.error(str(err))
-        else:
-            save(before, after, f"{'Added' if is_new else 'Saved'} {form['patient_id']}.", select=form["patient_id"])
+        _save_patient(tables, None if is_new else choice, form, course_rows)
 
     if not is_new:
         _saved_form_status(tables, choice, row)
     with st.expander("Level wording (paper form)"):
         st.dataframe(_wording(language))
     if not is_new:
-        _delete_section(choice, int((treatments["patient_id"] == choice).sum()), ver)
+        _delete_section(tables, choice, int((treatments["patient_id"] == choice).sum()), ver)
 
 
 # ----------------------------------------------------------------------------- pieces
+def _save_patient(tables, old_id: str | None, form: dict, courses: list[dict]) -> None:
+    """Add (old_id None) or replace a patient, then save; an edit that cannot be applied shows why."""
+    try:
+        after = edits.upsert_patient(tables, old_id, form, courses)
+    except edits.EditError as err:
+        st.error(str(err))
+        return
+    action = "Added" if old_id is None else "Saved"
+    data.save(tables, after, f"{action} {form['patient_id']}.", select=form["patient_id"])
+
+
 def _blank_form() -> pd.Series:
     row = pd.Series({col: "" for col in COLUMNS[FORMS]})
     row["form_language"] = "TH"
@@ -124,11 +121,10 @@ def _saved_form_status(tables, pid: str, row: pd.Series) -> None:
         st.warning("Checks for this patient:\n" + "\n".join(f"- {m}" for m in messages))
 
 
-def _delete_section(pid: str, n_courses: int, ver: int) -> None:
+def _delete_section(tables, pid: str, n_courses: int, ver: int) -> None:
     with st.expander("Delete this patient"):
-        st.write(f"Deletes the form of **{pid}** and its {n_courses} treatment course(s). "
-                 "Download a backup first (All patients & data).")
+        st.write(f"Deletes the form of **{pid}** and its {n_courses} treatment course(s). This cannot be undone; "
+                 "download a copy first if unsure (All patients & data).")
         confirmed = st.checkbox(f"Yes, delete {pid}", key=f"del_{pid}_{ver}")
         if st.button("Delete patient", disabled=not confirmed, type="primary"):
-            before = load_latest()
-            save(before, edits.delete_patient(before, pid), f"Deleted {pid}.", select=None)
+            data.save(tables, edits.delete_patient(tables, pid), f"Deleted {pid}.", select=None)

@@ -8,8 +8,8 @@ import streamlit as st
 from als.checks import ERROR, validate
 from als.model import FORMS, TREATMENTS, TYPES, treatment_names
 from als.report import summary, timeline
-from als.storage import read_workbook, to_workbook_bytes
-from views.shared import baseline_on, load_tables, save, show_flash
+from als.storage import WorkbookError, read_workbook, to_workbook_bytes
+from views import data, state
 
 SLOPE_COLS = ("slope_all", "slope_before", "slope_on_treatment")
 SLOPE_HELP = "ALSFRS-R points per month (linear regression on the monthly scores, Linear interpolation)."
@@ -18,13 +18,13 @@ XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 def render() -> None:
     st.title("All patients & data")
-    show_flash()
-    tables = load_tables()
-    baseline = baseline_on()
+    state.show_flash()
+    tables = data.load_tables()
+    baseline = state.baseline_on()
     table = summary(tables, baseline=baseline)
     _summary_section(tables, table, baseline)
     _download_section(tables, table, baseline)
-    _upload_section()
+    _upload_section(tables)
 
 
 def _summary_section(tables, table, baseline: bool) -> None:
@@ -54,17 +54,19 @@ def _download_section(tables, table, baseline: bool) -> None:
         data=months.assign(date=months["date"].dt.strftime("%m/%Y")).to_csv(index=False).encode("utf-8-sig"))
 
 
-def _upload_section() -> None:
+def _upload_section(current) -> None:
     st.subheader("Upload data (replace all data)")
-    st.caption("An .xlsx with the sheets forms, treatments and treatment_types, e.g. a workbook downloaded above "
-               "or raw_data.xlsx. It replaces everything in the current data store.")
+    st.caption("An .xlsx with the sheets forms, treatments and treatment_types: a workbook downloaded above, "
+               f"{data.BLANK_FILE.relative_to(data.ROOT)} (start empty) or {data.DUMMY_FILE.relative_to(data.ROOT)} "
+               "(22 DUMMY patients for training). It replaces everything in the data file; download a copy first "
+               "if you may need the current data again.")
     upload = st.file_uploader("Workbook", type=["xlsx"], label_visibility="collapsed")
     if upload is None:
         return
     try:
         new = read_workbook(upload)
-    except Exception as err:                        # not a readable workbook
-        st.error(f"Could not read this file: {err}")
+    except WorkbookError as err:
+        st.error("This file cannot be used:\n" + "\n".join(f"- {p}" for p in err.problems))
         return
     errors = [i for i in validate(new) if i.level == ERROR]
     st.write(f"File: {len(new[FORMS])} patients, {len(new[TREATMENTS])} treatment courses, "
@@ -73,4 +75,4 @@ def _upload_section() -> None:
         st.warning("\n".join(f"- {i.patient_id}: {i.message}" for i in errors))
     confirmed = st.checkbox("Yes, replace all current data with this file")
     if st.button("Replace all data", disabled=not confirmed, type="primary"):
-        save(None, new, f"Data replaced from {upload.name}.", check=False)
+        data.save(current, new, f"Data replaced from {upload.name}.", check=False)

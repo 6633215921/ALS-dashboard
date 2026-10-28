@@ -184,6 +184,11 @@ def slope_groups(grid: pd.DataFrame, months: tuple[int, int] | None = None) -> d
     return groups
 
 
+def round_slope(slope: float) -> float:
+    """Slope to 2 decimals for display (+ 0.0 turns -0.0 into 0.0, so it never shows as '-0.00')."""
+    return round(slope, 2) + 0.0
+
+
 def rounded(result: Fit | None) -> float | None:
-    """Slope to 2 decimals for display (never '-0.00')."""
-    return None if result is None else round(result.slope, 2) + 0.0
+    """The fit's slope for display, None without a fit."""
+    return None if result is None else round_slope(result.slope)

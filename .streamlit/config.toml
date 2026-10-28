@@ -1,0 +1,17 @@
+# Streamlit settings for this app (read by every "streamlit run app.py" started in this folder, also by start.bat).
+# The app holds patient data, so it answers only on the computer it runs on.
+
+[server]
+# Only this computer can open the app (http://localhost:8501); other computers on the network cannot.
+address = "localhost"
+port = 8501
+# No e-mail question in the black window on the first start.
+showEmailPrompt = false
+
+[browser]
+# Send no usage statistics to Streamlit.
+gatherUsageStats = false
+
+[client]
+# Hide developer options (rerun, clear cache, deploy) in the app menu.
+toolbarMode = "viewer"

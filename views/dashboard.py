@@ -5,10 +5,10 @@ import pandas as pd
 import streamlit as st
 
 from als.model import FORMS, ITEMS, TREATMENTS, TYPES, form_row, format_month, month_start, patient_ids, treatment_names
-from als.scoring import LINEAR, RAW_ONLY, STEP, fit, monthly, patient_courses, raw_points, slope_groups
-from views import chart
-from views.chart import SLOPE_LINES, UNIT, ChartOptions
-from views.shared import baseline_on, editor_version, load_tables, pick_patient
+from als.scoring import LINEAR, RAW_ONLY, STEP, fit, monthly, patient_courses, raw_points, rounded, slope_groups
+from views import chart, data, state
+from views.chart import SLOPE_LINES, UNIT, ChartOptions, PatientChart
+from views.widgets import pick_patient
 
 METHODS = {"Linear (default)": LINEAR, "Step (hold last score)": STEP, "None (raw points only)": RAW_ONLY}
 METHOD_HELP = ("Linear: straight line between raw points - the base for the slopes on every page. Step: the score "
@@ -27,12 +27,12 @@ CAPTION = ("Filled circles are raw points: a month in which at least one ALSFRS-
 
 def render() -> None:
     st.title("ALSFRS-R")
-    tables = load_tables()
+    tables = data.load_tables()
     ids = patient_ids(tables[FORMS])
     if not ids:
         st.info("No patients yet. Add one on the Patient form page, or upload a workbook on All patients & data.")
         return
-    baseline = baseline_on()
+    baseline = state.baseline_on()
     with st.sidebar:
         pid = pick_patient(ids, key="pick_dash")
         points = raw_points(form_row(tables, pid), baseline)
@@ -41,18 +41,22 @@ def render() -> None:
             return
         opts = _sidebar_options(pid, points, baseline)
 
+    patient = _patient_chart(tables, pid, points, opts)
+    _metrics(patient, opts)
+    st.plotly_chart(chart.figure(patient, opts), theme=None)
+    st.caption(CAPTION)
+    _slope_by_state(patient.grid)
+    _points_table(patient.grid)
+
+
+def _patient_chart(tables, pid: str, points: pd.DataFrame, opts: ChartOptions) -> PatientChart:
+    """Monthly timeline, slope groups and fits of one patient, with the options chosen in the sidebar."""
     courses = patient_courses(tables[TREATMENTS], pid)
     order = treatment_names(tables[TYPES])
     grid = monthly(points, courses, order, opts.method)
     grid["date"] = grid["month_no"].map(month_start)
     groups = slope_groups(grid, opts.time_of_interest)
-    fits = {key: fit(subset) for key, subset in groups.items()}
-
-    _metrics(grid, groups, fits, opts)
-    st.plotly_chart(chart.figure(pid, grid, courses, order, opts, groups, fits), theme=None)
-    st.caption(CAPTION)
-    _slope_by_state(grid)
-    _points_table(grid)
+    return PatientChart(pid, grid, courses, order, groups, {key: fit(subset) for key, subset in groups.items()})
 
 
 def _sidebar_options(pid: str, points: pd.DataFrame, baseline: bool) -> ChartOptions:
@@ -61,7 +65,7 @@ def _sidebar_options(pid: str, points: pd.DataFrame, baseline: bool) -> ChartOpt
         start, end = st.select_slider(
             "Time of interest", options=list(range(first, last + 1)), value=(first, last),
             format_func=lambda m: month_start(m).strftime("%b %Y"),
-            key=f"range_{pid}_{baseline}_{editor_version()}")
+            key=f"range_{pid}_{baseline}_{state.editor_version()}")
     else:
         start = end = first
     st.markdown("**Show on chart**")
@@ -73,14 +77,14 @@ def _sidebar_options(pid: str, points: pd.DataFrame, baseline: bool) -> ChartOpt
                         show_drugs=show_drugs, show_interpolated=show_interpolated)
 
 
-def _metrics(grid, groups, fits, opts: ChartOptions) -> None:
-    latest = grid[grid["source"] == "raw"].iloc[-1]
+def _metrics(patient: PatientChart, opts: ChartOptions) -> None:
+    latest = patient.grid[patient.grid["source"] == "raw"].iloc[-1]
     columns = st.columns(1 + len(SLOPE_LINES))
     columns[0].metric("Latest ALSFRS-R", f"{int(latest['sum_score'])} / 48",
                       help=f"{latest['date']:%b %Y} · {latest['treatment']}")
     filled_word = "filled" if opts.step else "interpolated"
     for col, line in zip(columns[1:], SLOPE_LINES, strict=True):
-        value, note = _slope_text(groups[line.key], fits[line.key], filled_word)
+        value, note = _slope_text(patient.groups[line.key], patient.fits[line.key], filled_word)
         if line.key == "range":
             start, end = opts.time_of_interest
             note = f"{month_start(start):%b %Y} – {month_start(end):%b %Y} · " + note
@@ -99,7 +103,7 @@ def _slope_text(subset: pd.DataFrame, result, filled_word: str) -> tuple[str, st
         note += f" · from {filled_word} months only"
     elif n_raw < 3:
         note += " · fewer than 3 raw points, not reliable"
-    return f"{round(result.slope, 2) + 0.0:+.2f}", note
+    return f"{rounded(result):+.2f}", note
 
 
 def _slope_by_state(grid: pd.DataFrame) -> None:
@@ -110,7 +114,7 @@ def _slope_by_state(grid: pd.DataFrame) -> None:
             rows.append({"treatment": label,
                          "from": format_month(group["month_no"].min()), "to": format_month(group["month_no"].max()),
                          "months": len(group), "raw points": int((group["source"] == "raw").sum()),
-                         f"slope ({UNIT})": None if result is None else round(result.slope, 2) + 0.0})
+                         f"slope ({UNIT})": rounded(result)})
         st.dataframe(pd.DataFrame(rows), hide_index=True, column_config={
             "treatment": st.column_config.TextColumn("treatment", width="large"),
             f"slope ({UNIT})": st.column_config.NumberColumn(f"slope ({UNIT})", format="%+.2f")})

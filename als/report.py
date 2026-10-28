@@ -19,7 +19,9 @@ def timeline(tables: Tables, baseline: bool = True, method: str = LINEAR) -> pd.
         _, _, grid = patient_timeline(tables, pid, baseline, method)
         if not grid.empty:
             parts.append(grid.assign(id=pid, date=grid["month_no"].map(month_start)))
-    return pd.concat(parts, ignore_index=True)[TIMELINE_COLS] if parts else pd.DataFrame(columns=TIMELINE_COLS)
+    if not parts:                                   # no patients, or none with a dated box yet
+        return pd.DataFrame(columns=TIMELINE_COLS).astype({"date": "datetime64[ns]"})
+    return pd.concat(parts, ignore_index=True)[TIMELINE_COLS]
 
 
 def summary(tables: Tables, baseline: bool = True, method: str = LINEAR) -> pd.DataFrame:
